@@ -3,8 +3,8 @@ const mediasoupClient = require("mediasoup-client");
 
 const socket = io("/mediasoup");
 
-socket.on("connection-success", ({ socketId }) => {
-  console.log(socketId);
+socket.on("connection-success", ({ socketId, existsProducer }) => {
+  console.log(socketId, existsProducer);
 });
 
 let device;
@@ -13,6 +13,7 @@ let producerTransport;
 let consumerTransport;
 let producer;
 let consumer;
+let isProducer = false;
 
 let params = {
   // mediasoup params
@@ -38,18 +39,20 @@ let params = {
   },
 };
 
-const streamSuccess = async (stream) => {
+const streamSuccess = (stream) => {
   localVideo.srcObject = stream;
   const track = stream.getVideoTracks()[0];
   params = {
     track,
     ...params,
   };
+
+  goConnect(true);
 };
 
 const getLocalStream = () => {
-  navigator.getUserMedia(
-    {
+  navigator.mediaDevices
+    .getUserMedia({
       audio: false,
       video: {
         width: {
@@ -61,12 +64,24 @@ const getLocalStream = () => {
           max: 1080,
         },
       },
-    },
-    streamSuccess,
-    (error) => {
+    })
+    .then(streamSuccess)
+    .catch((error) => {
       console.log(error.message);
-    }
-  );
+    });
+};
+
+const goConsume = () => {
+  goConnect(false);
+};
+
+const goConnect = (producerOrConsumer) => {
+  isProducer = producerOrConsumer;
+  device === undefined ? getRtpCapabilities() : goCreateTransport();
+};
+
+const goCreateTransport = () => {
+  isProducer ? createSendTransport() : createRecvTransport();
 };
 
 const createDevice = async () => {
@@ -78,6 +93,9 @@ const createDevice = async () => {
     });
 
     console.log("RTP Capabilities", rtpCapabilities);
+
+    // once the device loads, create transport
+    goCreateTransport();
   } catch (error) {
     console.log(error);
     if (error.name === "UnsupportedError")
@@ -86,11 +104,14 @@ const createDevice = async () => {
 };
 
 const getRtpCapabilities = () => {
-  socket.emit("getRtpCapabilities", (data) => {
+  socket.emit("createRoom", (data) => {
     // console.log(`Router RTP Capabilities... ${data.rtpCapabilities}`);
     console.log("Router RTP Capabilities...", data.rtpCapabilities);
 
     rtpCapabilities = data.rtpCapabilities;
+
+    // once we have rtpCapabilities from the Router, create Device
+    createDevice();
   });
 };
 
@@ -142,6 +163,7 @@ const createSendTransport = () => {
         errback(error);
       }
     });
+    connectSendTransport();
   });
 };
 
@@ -194,6 +216,8 @@ const createRecvTransport = async () => {
           }
         }
       );
+
+      connectRecvTransport();
     }
   );
 };
@@ -227,10 +251,5 @@ const connectRecvTransport = async () => {
   );
 };
 
-btnLocalVideo.addEventListener("click", getLocalStream);
-btnRtpCapabilities.addEventListener("click", getRtpCapabilities);
-btnDevice.addEventListener("click", createDevice);
-btnCreateSendTransport.addEventListener("click", createSendTransport);
-btnConnectSendTransport.addEventListener("click", connectSendTransport);
-btnCreateRecvTransport.addEventListener("click", createRecvTransport);
-btnConnectRecvTransport.addEventListener("click", connectRecvTransport);
+btnPublish.addEventListener("click", getLocalStream);
+btnConsume.addEventListener("click", goConsume);
